@@ -3,10 +3,11 @@ import torch
 from torch_geometric.data import Data
 
 def build_graph_from_csv(csv_path: str = None, df: pd.DataFrame = None):
-    if df is None and csv_path is not None:
-        df = pd.read_csv(csv_path)
-    elif df is None:
-        raise ValueError("Eitehr csv_path or df must be provided")
+    if df is None:
+        if csv_path is not None:
+            df = pd.read_csv(csv_path)
+        else:
+            raise ValueError("Eitehr csv_path or df must be provided")
 
     node_map = {}  # maps string ID -> node index
     edges_src = []
