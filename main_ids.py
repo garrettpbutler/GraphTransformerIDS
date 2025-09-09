@@ -32,7 +32,17 @@ def prepare_features_and_labels(data, node_map, df):
     
     node_protocols = {i: [] for i in range(len(node_map))}
     
+    print(f"PFL - DataFrame length: {len(df)}")
+    print(f"PFL - Edge index columns: {data.edge_index.shape[1]}")
+    
+    if len(df) != data.edge_index.shape[1]:
+        print(F"PFL - WARNING: DataFrame rows ({len(df)}) don't match edge count ({data.edge_index.shape[1]})")
+    
     for idx, row in df.iterrows():
+        if idx >= data.edge_index.shape[1]:
+            print(f"PFL - WARNING: Index {idx} exceeds edge index bounds")
+            continue
+        
         proto = row["protocol"].lower()
         proto_label = 0 if proto == "goose" else 1 if proto == "dnp3" else -1
         
@@ -43,6 +53,10 @@ def prepare_features_and_labels(data, node_map, df):
             
             node_protocols[src_idx].append(proto_label)
             node_protocols[dst_idx].append(proto_label)
+            
+    # Debug: check how many nodes have protocol information
+    empty_nodes = sum(1 for protocols in node_protocols.values() if not protocols)
+    print(f"Nodes with no protocol info: {empty_nodes}/{len(node_protocols)}")
 
     features, labels = [], []
     for node_idx in range(len(inv_node_map)):
@@ -66,10 +80,20 @@ def main():
     csv_path = "./FusionTest_Output.csv"
     df = pd.read_csv(csv_path)
     
+    print(f"DataFrame shape: {df.shape}")
+    print(f"Protocol value counts:\n{df['protocol'].value_counts()}")
+    
     data, node_map = build_graph_from_csv(df)
+    
+    print(f"Number of nodes: {len(node_map)}")
+    print(f"Edge index shape: {data.edge_index.shape}")
 
     # Extract node features + labels
     features, labels = prepare_features_and_labels(data, node_map, df)
+    
+    print(f"Number of features: {len(features)}")
+    print(f"Numer of labels: {len(labels)}")
+    print(f"Label distribution: {pd.Series(labels).value_counts()}")
 
     # Build PyG Data object
     dataset = build_data(features, labels, data.edge_index)
