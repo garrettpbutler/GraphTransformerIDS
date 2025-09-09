@@ -1,4 +1,5 @@
 # main.py
+import pandas as pd
 import torch
 import torch.nn as nn
 from dataset_builder import build_graph_from_csv
@@ -10,24 +11,38 @@ def prepare_features_and_labels(data, node_map, df):
     - One-hot protocol feature for each node
     - Label = 0 (GOOSE) or 1 (DNP3)
     """
-    # Reverse map to get index -> ID
+    # # Reverse map to get index -> ID
     inv_node_map = {v: k for k, v in node_map.items()}
 
-    # Track protocols per node
-    node_protocols = {i: [] for i in inv_node_map.keys()}
+    # # Track protocols per node
+    # node_protocols = {i: [] for i in inv_node_map.keys()}
 
-    for _, row in df.iterrows():
+    # for _, row in df.iterrows():
+    #     proto = row["protocol"].lower()
+    #     proto_label = 0 if proto == "goose" else 1 if proto == "dnp3" else -1
+
+    #     src_id = inv_node_map.get(data.edge_index[0, _].item(), None)
+    #     dst_id = inv_node_map.get(data.edge_index[1, _].item(), None)
+
+    #     if proto_label != -1:
+    #         if src_id is not None:
+    #             node_protocols[src_id].append(proto_label)
+    #         if dst_id is not None:
+    #             node_protocols[dst_id].append(proto_label)
+    
+    node_protocols = {i: [] for i in range(len(node_map))}
+    
+    for idx, row in df.iterrows():
         proto = row["protocol"].lower()
         proto_label = 0 if proto == "goose" else 1 if proto == "dnp3" else -1
-
-        src_id = inv_node_map.get(data.edge_index[0, _].item(), None)
-        dst_id = inv_node_map.get(data.edge_index[1, _].item(), None)
-
+        
         if proto_label != -1:
-            if src_id is not None:
-                node_protocols[src_id].append(proto_label)
-            if dst_id is not None:
-                node_protocols[dst_id].append(proto_label)
+            # Get source and destination node indices for thsi row
+            src_idx = data.edge_index[0, idx].item()
+            dst_idx = data.edge_index[1, idx].item()
+            
+            node_protocols[src_idx].append(proto_label)
+            node_protocols[dst_idx].append(proto_label)
 
     features, labels = [], []
     for node_idx in range(len(inv_node_map)):
@@ -49,11 +64,9 @@ def prepare_features_and_labels(data, node_map, df):
 def main():
     # Load CSV into graph
     csv_path = "./FusionTest_Output.csv"
-    data, node_map = build_graph_from_csv(csv_path)
-
-    # Reload original CSV (needed for protocol labels)
-    import pandas as pd
     df = pd.read_csv(csv_path)
+    
+    data, node_map = build_graph_from_csv(df)
 
     # Extract node features + labels
     features, labels = prepare_features_and_labels(data, node_map, df)
