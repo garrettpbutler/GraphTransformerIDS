@@ -4,7 +4,7 @@ from torch_geometric.data import Data
 
 def build_graph_from_csv(df):
     if df is None:
-        raise ValueError("Eitehr csv_path or df must be provided")
+        raise ValueError("df must be provided")
 
     node_map = {}  # maps string ID -> node index
     edges_src = []

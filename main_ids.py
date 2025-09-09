@@ -93,7 +93,7 @@ def main():
     
     print(f"Number of features: {len(features)}")
     print(f"Numer of labels: {len(labels)}")
-    print(f"Label distribution: {pd.Series(labels).value_counts()}")
+    print(f"Label distribution:\n {pd.Series(labels).value_counts()}")
 
     # Build PyG Data object
     dataset = build_data(features, labels, data.edge_index)
