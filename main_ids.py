@@ -48,7 +48,7 @@ def prepare_features_and_labels(data, node_map, df):
 
 def main():
     # Load CSV into graph
-    csv_path = "FusionTest_Output.csv"
+    csv_path = "./FusionTest_Output.csv"
     data, node_map = build_graph_from_csv(csv_path)
 
     # Reload original CSV (needed for protocol labels)
