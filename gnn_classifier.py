@@ -42,9 +42,9 @@ class SimpleGNN(nn.Module):
 #     return Data(x=x, y=y, edge_index=edge_index, 
 #                 train_mask=train_mask, val_mask=val_mask, test_mask=test_mask)
 
-def build_data(features, labels, edge_index):
+def build_data(features, labels, edge_index, split_type='train'):
     """
-    Simple version: use all data for training (no validation/test for prototype)
+    Build Data object with appropriate mask for train/val/test
     """
     x = torch.tensor(features, dtype=torch.float)
     y = torch.tensor(labels, dtype=torch.long)
@@ -52,25 +52,48 @@ def build_data(features, labels, edge_index):
 
     num_nodes = len(y)
     
-    # Use all data for training
-    train_mask = torch.ones(num_nodes, dtype=torch.bool)
-    val_mask = torch.zeros(num_nodes, dtype=torch.bool)
-    test_mask = torch.zeros(num_nodes, dtype=torch.bool)
+    # Create masks based on split type
+    if split_type == 'train':
+        train_mask = torch.ones(num_nodes, dtype=torch.bool)
+        val_mask = torch.zeros(num_nodes, dtype=torch.bool)
+        test_mask = torch.zeros(num_nodes, dtype=torch.bool)
+    elif split_type == 'val':
+        train_mask = torch.zeros(num_nodes, dtype=torch.bool)
+        val_mask = torch.ones(num_nodes, dtype=torch.bool)
+        test_mask = torch.zeros(num_nodes, dtype=torch.bool)
+    elif split_type == 'test':
+        train_mask = torch.zeros(num_nodes, dtype=torch.bool)
+        val_mask = torch.zeros(num_nodes, dtype=torch.bool)
+        test_mask = torch.ones(num_nodes, dtype=torch.bool)
+    else:
+        raise ValueError("split_type must be 'train', 'val', or 'test'")
 
     return Data(x=x, y=y, edge_index=edge_index, 
                 train_mask=train_mask, val_mask=val_mask, test_mask=test_mask)
 
 # --- Training Loop ---
-def train(model, data, optimizer, criterion, epochs=50):
+def train(model, train_data, val_data, optimizer, criterion, epochs=50):
     model.train()
+    
     for epoch in range(epochs):
+        # Training
         optimizer.zero_grad()
-        out = model(data.x, data.edge_index)
-        loss = criterion(out[data.train_mask], data.y[data.train_mask])
+        out = model(train_data.x, train_data.edge_index)
+        loss = criterion(out[train_data.train_mask], train_data.y[train_data.train_mask])
         loss.backward()
         optimizer.step()
+        
+        # Validation every 10 epochs
         if epoch % 10 == 0:
-            print(f"Epoch {epoch}, Loss: {loss.item():.4f}")
+            model.eval()
+            with torch.no_grad():
+                val_out = model(val_data.x, val_data.edge_index)
+                val_loss = criterion(val_out[val_data.val_mask], val_data.y[val_data.val_mask])
+                val_pred = val_out.argmax(dim=1)
+                val_acc = (val_pred[val_data.val_mask] == val_data.y[val_data.val_mask]).sum() / val_data.val_mask.sum()
+            
+            print(f"Epoch {epoch}, Train Loss: {loss.item():.4f}, Val Loss: {val_loss.item():.4f}, Val Acc: {val_acc:.4f}")
+            model.train()
 
 # # --- Evaluation ---
 # def test(model, data):
@@ -81,10 +104,17 @@ def train(model, data, optimizer, criterion, epochs=50):
 #     print(f"Test Accuracy: {acc:.4f}")
 #     return acc
 
-def test(model, data):
+def test(model, test_data):
     model.eval()
-    out = model(data.x, data.edge_index)
-    pred = out.argmax(dim=1)
-    acc = (pred == data.y).sum() / len(data.y)  # Test on all data
-    print(f"Accuracy: {acc:.4f}")
+    with torch.no_grad():
+        out = model(test_data.x, test_data.edge_index)
+        pred = out.argmax(dim=1)
+        acc = (pred[test_data.test_mask] == test_data.y[test_data.test_mask]).sum() / test_data.test_mask.sum()
+        print(f"Test Accuracy: {acc:.4f}")
+        
+        # Additional metrics
+        correct = (pred[test_data.test_mask] == test_data.y[test_data.test_mask]).sum().item()
+        total = test_data.test_mask.sum().item()
+        print(f"Test Results: {correct}/{total} correct")
+        
     return acc

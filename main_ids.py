@@ -77,26 +77,47 @@ def prepare_features_and_labels(data, node_map, df):
 
 def main():
     # Load CSV into graph
-    csv_path = "./FusionTest_Output.csv"
-    df = pd.read_csv(csv_path)
+    train_csv_path = "./FusionTest_Output.csv"
+    val_csv_path = "./FusionTest_Output.csv"
+    test_csv_path = "./FusionTest_Output.csv"
+    train_df = pd.read_csv(train_csv_path)
+    val_df = pd.read_csv(val_csv_path)
+    test_df = pd.read_csv(test_csv_path)
     
-    print(f"DataFrame shape: {df.shape}")
-    print(f"Protocol value counts:\n{df['protocol'].value_counts()}")
+    print(f"DataFrame shape: {train_csv_path.shape}")
+    print(f"Protocol value counts:\n{train_csv_path['protocol'].value_counts()}")
     
-    data, node_map = build_graph_from_csv(df)
+    train_data, train_node_map = build_graph_from_csv(train_df)
+    val_data, val_node_map = build_graph_from_csv(val_df)
+    test_data, test_node_map = build_graph_from_csv(test_df)
+
+    print("Creating unified node mapping...")
+    all_nodes = set(train_node_map.keys()) | set(val_node_map.keys()) | set(test_node_map.keys())
+    unified_node_map = {node: idx for idx, node in enumerate(all_nodes)}
     
-    print(f"Number of nodes: {len(node_map)}")
-    print(f"Edge index shape: {data.edge_index.shape}")
+    print(f"Number of nodes: {len(train_node_map)}")
+    print(f"Edge index shape: {train_data.edge_index.shape}")
+
+    print(f"Total number of nodes: {len(unified_node_map)}")
 
     # Extract node features + labels
-    features, labels = prepare_features_and_labels(data, node_map, df)
+    print("Preparing training features and labels...")
+    train_features, train_labels = prepare_features_and_labels(train_data, unified_node_map, train_df)
+
+    print("Preparing validation features and labels...")
+    val_features, val_labels = prepare_features_and_labels(val_data, unified_node_map, val_df)
+
+    print("Preparing test features and labels...")
+    test_features, test_labels = prepare_features_and_labels(test_data, unified_node_map, test_df)
     
     print(f"Number of features: {len(features)}")
     print(f"Numer of labels: {len(labels)}")
     print(f"Label distribution:\n {pd.Series(labels).value_counts()}")
 
     # Build PyG Data object
-    dataset = build_data(features, labels, data.edge_index)
+    train_dataset = build_data(train_features, train_labels, train_data.edge_index, split_type='train')
+    val_dataset = build_data(val_features, val_labels, val_data.edge_index, split_type='val')
+    test_dataset = build_data(test_features, test_labels, test_data.edge_index, split_type='test')
 
     # Init model
     model = SimpleGNN(in_channels=2, hidden_channels=16, out_channels=2)
@@ -104,8 +125,8 @@ def main():
     criterion = nn.NLLLoss()
 
     # Train + test
-    train(model, dataset, optimizer, criterion, epochs=50)
-    test(model, dataset)
+    train(model, train_dataset, val_dataset, optimizer, criterion, epochs=50)
+    test(model, test_dataset)
 
 if __name__ == "__main__":
     main()
