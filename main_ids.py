@@ -110,9 +110,9 @@ def main():
     print("Preparing test features and labels...")
     test_features, test_labels = prepare_features_and_labels(test_data, unified_node_map, test_df)
     
-    print(f"Number of features: {len(features)}")
-    print(f"Numer of labels: {len(labels)}")
-    print(f"Label distribution:\n {pd.Series(labels).value_counts()}")
+    print(f"Number of features: {len(train_features)}")
+    print(f"Numer of labels: {len(train_features)}")
+    print(f"Label distribution:\n {pd.Series(train_features).value_counts()}")
 
     # Build PyG Data object
     train_dataset = build_data(train_features, train_labels, train_data.edge_index, split_type='train')
