@@ -84,8 +84,8 @@ def main():
     val_df = pd.read_csv(val_csv_path)
     test_df = pd.read_csv(test_csv_path)
     
-    print(f"DataFrame shape: {train_csv_path.shape}")
-    print(f"Protocol value counts:\n{train_csv_path['protocol'].value_counts()}")
+    print(f"DataFrame shape: {train_df.shape}")
+    print(f"Protocol value counts:\n{train_df['protocol'].value_counts()}")
     
     train_data, train_node_map = build_graph_from_csv(train_df)
     val_data, val_node_map = build_graph_from_csv(val_df)
