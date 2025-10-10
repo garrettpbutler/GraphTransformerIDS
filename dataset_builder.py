@@ -1,196 +1,214 @@
+# dataset_builder.py
 import pandas as pd
 import torch
+import os
+import glob
+import ast
 from torch_geometric.data import Data
 
-def create_time_feature(row):
-    """
-    Create a normalized time feature from hour, minute, second, microsecond
-    Returns a value between 0 and 1 representing the time of day
-    """
-    try:
-        hour = float(row.get("hour", 0))
-        minute = float(row.get("minute", 0))
-        second = float(row.get("second", 0))
-        microsecond = float(row.get("microsecond", 0))
+class ProtocolGraphBuilder:
+    def __init__(self):
+        self.protocol_nodes = {
+            'GOOSE': 0,
+            'DNP3': 1, 
+            'TCP': 2
+        }
+        self.num_protocols = len(self.protocol_nodes)
+    
+    def parse_list_features(self, feature_str):
+        """Parse string representations of lists from CSV"""
+        try:
+            if pd.isna(feature_str):
+                return []
+            return ast.literal_eval(str(feature_str))
+        except:
+            return []
+    
+    def load_protocol_data(self, directory_path):
+        """
+        Load all protocol CSV files from a directory
+        Returns: dict with protocol -> DataFrame
+        """
+        protocol_files = {
+            'GOOSE': 'goose_windows_*.csv',
+            'DNP3': 'dnp3_windows_*.csv', 
+            'TCP': 'tcp_windows_*.csv'
+        }
         
-        # Convert to total seconds in the day
-        total_seconds = hour * 3600 + minute * 60 + second + microsecond / 1_000_000
+        protocol_data = {}
         
-        # Normalize to [0, 1] range (86400 seconds in a day)
-        normalized_time = total_seconds / 86400.0
+        for protocol, pattern in protocol_files.items():
+            file_path = os.path.join(directory_path, pattern)
+            matching_files = glob.glob(file_path)
+            
+            if matching_files:
+                # Assuming one file per protocol for now
+                df = pd.read_csv(matching_files[0])
+                protocol_data[protocol] = df
+                print(f"Loaded {protocol} data: {len(df)} windows from {matching_files[0]}")
+            else:
+                print(f"Warning: No {protocol} files found in {directory_path}")
+                protocol_data[protocol] = pd.DataFrame()
         
-        return normalized_time
+        return protocol_data
+    
+    def create_protocol_features(self, protocol_data):
+        """
+        Create feature vectors for each protocol based on window data
+        """
+        protocol_features = {proto: [] for proto in self.protocol_nodes.keys()}
         
-    except (ValueError, TypeError):
-        return 0.0  # Default value if time data is missing
-
-def build_graph_from_csv(df):
-    if df is None:
-        raise ValueError("df must be provided")
-
-    node_map = {}  # maps string ID -> node index
-    edges_src = []
-    edges_dst = []
-    edge_features = []
-
-    def get_node_id(row, is_source=True):
-        """Return a unique node identifier string for source or destination."""
-        proto = row["protocol"].lower()
-        if proto == "goose":
-            # Use MAC address
-            eth_cols = [f'{"Source" if is_source else "Destination"}_eth{i}' for i in range(1, 7)]
-            mac = ":".join(str(row[c]) for c in eth_cols)
-            return mac
-        elif proto == "dnp3":
-            # Use IP:Port
-            ip_cols = [f'{"source" if is_source else "destination"}_ip{i}' for i in range(1, 5)]
-            ip = ".".join(str(row[c]) for c in ip_cols)
-            port = row["source_port"] if is_source else row["destination_port"]
-            return f"{ip}:{port}"
+        for protocol, df in protocol_data.items():
+            if df.empty:
+                continue
+                
+            for _, window in df.iterrows():
+                features = self._extract_protocol_features(protocol, window)
+                protocol_features[protocol].append(features)
+        
+        return protocol_features
+    
+    def _extract_protocol_features(self, protocol, window_row):
+        """Extract features for a specific protocol window"""
+        if protocol == 'GOOSE':
+            return self._extract_goose_features(window_row)
+        elif protocol == 'DNP3':
+            return self._extract_dnp3_features(window_row)
+        elif protocol == 'TCP':
+            return self._extract_tcp_features(window_row)
         else:
-            return f"unknown_{'src' if is_source else 'dst'}"
-
-    # Iterate rows and construct graph
-    for _, row in df.iterrows():
-        src_id = get_node_id(row, is_source=True)
-        dst_id = get_node_id(row, is_source=False)
-
-        # Assign node indices if new
-        if src_id not in node_map:
-            node_map[src_id] = len(node_map)
-        if dst_id not in node_map:
-            node_map[dst_id] = len(node_map)
-
-        src_idx = node_map[src_id]
-        dst_idx = node_map[dst_id]
-
-        edges_src.append(src_idx)
-        edges_dst.append(dst_idx)
-
-        # Edge features
-        proto = row["protocol"].lower()
-        if proto == "goose":
-            protocol_feat = [1, 0]
-            frame = row["No."]
-            frame_length = row["Length"]
-            stNum = row["StNum"]
-            sqNum = row["SqNum"]
-            boolean = int(row["Boolean"])
-            time = create_time_feature(row)
-            link_src = -1
-            link_dst = -1
-            fir_feat = -1
-            fin_feat = -1
-            seq_feat = -1
-            iin_bits = [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1]
-            primary_func = [-1, -1, -1, -1]
-            second_func = [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1]
-        elif proto == "dnp3":
-            protocol_feat = [0, 1]
-            frame = row["frame_number"]
-            frame_length = row["frame_length"]
-            stNum = -1
-            sqNum = -1
-            boolean = -1
-            time = create_time_feature(row)
-            dfc_feat = row["dfc_bit"]
-            link_src = row["link_src"]
-            link_dst = row["link_dst"]
-            fir_feat = row["FIR"]
-            fin_feat = row["FIN"]
-            seq_feat = row["SEQ"]
-            iin_bits = [row["iin_device_restart"], row["iin_device_trouble"], row["iin_digital_outputs_in_local"], 
-                        row["iin_time_sync_required"], row["iin_class3_data_available"], row["iin_class2_data_available"], 
-                        row["iin_class1_data_available"], row["iin_broadcast_msg_rx"], row["iin_configuration_corrupt"], 
-                        row["iin_operation_already_executing"], row["iin_event_buffer_overflow"], 
-                        row["iin_parameters_invalid_or_out_of_range"], row["iin_requested_objects_unknown"], 
-                        row["iin_function_code_not_implemented"]]
-            primary_func = [row["primary_func_1"], row["primary_func_4"], row["primary_func_14"], row["primary_func_15"]]
-            second_func = [row["function_0"], row["function_1"], row["function_2"], row["function_3"], row["function_4"], 
-                           row["function_5"], row["function_6"], row["function_7"], row["function_8"], row["function_9"], 
-                           row["function_10"], row["function_11"], row["function_12"], row["function_13"], row["function_14"], 
-                           row["function_129"], row["function_130"]]
+            return []
+    
+    def _extract_goose_features(self, row):
+        """Extract GOOSE protocol features"""
+        features = [
+            row.get('Num_Packets', 0) / 100.0,  # Normalized packet count
+            row.get('Avg_Length', 0) / 1500.0,  # Normalized length
+            row.get('stNum_Change', 0),
+            row.get('sqNum_Reset', 0), 
+            row.get('ConfRev_Change', 0),
+            row.get('Boolean_Data_Change', 0)
+        ]
+        
+        # Add MAC address diversity (number of unique MACs)
+        src_macs = self.parse_list_features(row.get('Eth_Src', '[]'))
+        dst_macs = self.parse_list_features(row.get('Eth_Dst', '[]'))
+        mac_diversity = len(set(src_macs + dst_macs)) / 10.0  # Normalized
+        features.append(mac_diversity)
+        
+        return features
+    
+    def _extract_dnp3_features(self, row):
+        """Extract DNP3 protocol features"""
+        features = [
+            row.get('Num_Packets', 0) / 100.0,
+            row.get('Avg_DNP3_Length', 0) / 1500.0,
+            row.get('IIN_Val_Change', 0),
+            row.get('IIN_Bits_Set', 0) if not isinstance(row.get('IIN_Bits_Set', 0), list) else len(row.get('IIN_Bits_Set', [])),
+            row.get('Data_Object_Change', 0)
+        ]
+        
+        # Parse function codes
+        func_codes = self.parse_list_features(row.get('Function_Codes', '[]'))
+        if func_codes:
+            features.extend([
+                sum(func_codes) / len(func_codes),  # Avg function code usage
+                max(func_codes) / 10.0,  # Normalized max function code
+                len([fc for fc in func_codes if fc > 0]) / len(func_codes)  # Active function ratio
+            ])
         else:
-            protocol_feat = [0, 0]
-            frame_length = 0
-            frame = -1
-            frame_length = -1
-            stNum = -1
-            sqNum = -1
-            boolean = -1
-            time = "00:00:00.0000"
-            dfc_feat = -1
-            link_src = -1
-            link_dst = -1
-            fir_feat = -1
-            fin_feat = -1
-            seq_feat = -1
-            iin_bits = [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1]
-            primary_func = [-1, -1, -1, -1]
-            second_func = [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1]
-
-        edge_features.append(protocol_feat + [frame_length])
-
-    # Build tensors
-    edge_index = torch.tensor([edges_src, edges_dst], dtype=torch.long)
-    edge_attr = torch.tensor(edge_features, dtype=torch.float)
-
-    # Node features (empty for now)
-    x = torch.zeros((len(node_map), 1), dtype=torch.float)
-
-    data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
-    return data, node_map
-
-def combine_graphs(graphs_list, node_maps_list):
-    """
-    Combine multiple graphs into a single graph with unified node mapping
-    Returns: combined_data, unified_node_map
-    """
-    # Collect all unique nodes
-    all_nodes = set()
-    for node_map in node_maps_list:
-        all_nodes.update(node_map.keys())
+            features.extend([0, 0, 0])
+        
+        return features
     
-    # Create unified node mapping
-    unified_node_map = {node: idx for idx, node in enumerate(all_nodes)}
-    
-    # Combine edge indices and attributes
-    combined_edges_src = []
-    combined_edges_dst = []
-    combined_edge_attr = []
-    
-    for graph_data, node_map in zip(graphs_list, node_maps_list):
-        # Convert edges to unified mapping
-        for i in range(graph_data.edge_index.shape[1]):
-            src_old_idx = graph_data.edge_index[0, i].item()
-            dst_old_idx = graph_data.edge_index[1, i].item()
+    def _extract_tcp_features(self, row):
+        """Extract TCP protocol features"""
+        features = [
+            row.get('Num_Packets', 0) / 100.0,
+            row.get('Avg_Length', 0) / 1500.0,
+            row.get('Connection_Count', 0) / 10.0  # Normalized connection count
+        ]
+        
+        # Parse TCP flags
+        tcp_flags = self.parse_list_features(row.get('TCP_Flags', '[]'))
+        if tcp_flags:
+            features.extend(tcp_flags[:5])  # Use first 5 flag indicators
+        else:
+            features.extend([0, 0, 0, 0, 0])
+        
+        # Ensure consistent feature length
+        while len(features) < 8:
+            features.append(0)
             
-            # Find original node IDs
-            inv_node_map = {v: k for k, v in node_map.items()}
-            src_old_id = inv_node_map[src_old_idx]
-            dst_old_id = inv_node_map[dst_old_idx]
-            
-            # Convert to unified indices
-            src_new_idx = unified_node_map[src_old_id]
-            dst_new_idx = unified_node_map[dst_old_id]
-            
-            combined_edges_src.append(src_new_idx)
-            combined_edges_dst.append(dst_new_idx)
-            
-            # Add edge attributes if available
-            if hasattr(graph_data, 'edge_attr') and graph_data.edge_attr is not None:
-                combined_edge_attr.append(graph_data.edge_attr[i].tolist())
+        return features[:8]  # Standardize to 8 features
     
-    # Build combined tensors
-    edge_index = torch.tensor([combined_edges_src, combined_edges_dst], dtype=torch.long)
+    def build_temporal_graph(self, protocol_features, window_num):
+        """
+        Build graph for a specific time window
+        Each protocol becomes a node, edges represent protocol interactions
+        """
+        # Node features: stack all protocol features for this window
+        node_feature_list = []
+        valid_protocols = []
+        
+        for protocol in self.protocol_nodes.keys():
+            if (protocol in protocol_features and 
+                len(protocol_features[protocol]) > window_num):
+                features = protocol_features[protocol][window_num]
+                node_feature_list.append(features)
+                valid_protocols.append(protocol)
+            else:
+                # Use zero features for missing protocol data
+                default_size = 8  # Standardized feature size
+                node_feature_list.append([0.0] * default_size)
+                valid_protocols.append(protocol)
+        
+        # Create fully connected graph between protocols
+        edge_src, edge_dst = [], []
+        
+        for i, proto1 in enumerate(self.protocol_nodes.keys()):
+            for j, proto2 in enumerate(self.protocol_nodes.keys()):
+                if i != j:  # No self-loops
+                    edge_src.append(i)
+                    edge_dst.append(j)
+        
+        # Convert to tensors
+        x = torch.tensor(node_feature_list, dtype=torch.float)
+        edge_index = torch.tensor([edge_src, edge_dst], dtype=torch.long)
+        
+        # Create edge attributes (simple ones for now)
+        edge_attr = torch.ones(len(edge_src), 1)  # Uniform edge weights
+        
+        return Data(x=x, edge_index=edge_index, edge_attr=edge_attr, 
+                   window_num=window_num, protocols=valid_protocols)
     
-    if combined_edge_attr:
-        edge_attr = torch.tensor(combined_edge_attr, dtype=torch.float)
-    else:
-        edge_attr = None
+    def build_graph_dataset(self, directory_path):
+        """
+        Main function to build graph dataset from directory of CSV files
+        """
+        # Load protocol data
+        protocol_data = self.load_protocol_data(directory_path)
+        
+        # Extract features
+        protocol_features = self.create_protocol_features(protocol_data)
+        
+        # Determine number of time windows (use min to handle different lengths)
+        window_counts = []
+        for protocol, features in protocol_features.items():
+            if features:
+                window_counts.append(len(features))
+        
+        if not window_counts:
+            raise ValueError("No protocol data found in directory")
+        
+        num_windows = min(window_counts)
+        print(f"Building graphs for {num_windows} time windows")
+        
+        # Build graphs for each time window
+        graph_dataset = []
+        for window_num in range(num_windows):
+            graph_data = self.build_temporal_graph(protocol_features, window_num)
+            graph_dataset.append(graph_data)
+        
+        return graph_dataset
     
-    # Node features (will be populated later)
-    x = torch.zeros((len(unified_node_map), 1), dtype=torch.float)
-    
-    data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
-    return data, unified_node_map
