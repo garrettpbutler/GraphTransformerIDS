@@ -80,7 +80,7 @@ class ProtocolGraphBuilder:
             return []
     
     def _extract_goose_features(self, row):
-        """Extract GOOSE protocol features keeping list structures"""
+        """Extract GOOSE protocol features"""
         features = [
             row.get('Num_Packets', 0) / 100.0,                    # Feature 0
             row.get('Avg_Length', 0) / 1500.0,                    # Feature 1  
@@ -90,21 +90,21 @@ class ProtocolGraphBuilder:
             float(row.get('Boolean_Data_Change', 0)),             # Feature 5
         ]
         
-        # Use the actual list lengths as features
+        # Use list lengths from MAC addresses
         src_macs = self.parse_list_features(row.get('Eth_Src', '[]'))
         dst_macs = self.parse_list_features(row.get('Eth_Dst', '[]'))
         
-        # Feature 6: Number of source MACs (normalized)
+        # Feature 6: Number of source MACs
         features.append(len(src_macs) / 10.0)
         
-        # Feature 7: Number of destination MACs (normalized)
+        # Feature 7: Number of destination MACs  
         features.append(len(dst_macs) / 10.0)
         
         assert len(features) == 8, f"GOOSE features should be 8, got {len(features)}"
         return features
     
     def _extract_dnp3_features(self, row):
-        """Extract DNP3 protocol features keeping list structures"""
+        """Extract DNP3 protocol features"""
         features = [
             row.get('Num_Packets', 0) / 100.0,                    # Feature 0
             row.get('Avg_DNP3_Length', 0) / 1500.0,               # Feature 1
@@ -132,9 +132,9 @@ class ProtocolGraphBuilder:
         
         assert len(features) == 8, f"DNP3 features should be 8, got {len(features)}"
         return features
-
+    
     def _extract_tcp_features(self, row):
-        """Extract TCP protocol features keeping list structures"""
+        """Extract TCP protocol features"""
         features = [
             row.get('Num_Packets', 0) / 100.0,                    # Feature 0
             row.get('Avg_Length', 0) / 1500.0,                    # Feature 1
@@ -151,7 +151,7 @@ class ProtocolGraphBuilder:
         # Feature 3: Number of destination IP:Port pairs
         features.append(len(dst_ips) / 10.0)
         
-        # Feature 4: Connection count (from your CSV)
+        # Feature 4: Connection count
         features.append(float(row.get('Connection_Count', 0)) / 10.0)
         
         # Features 5-7: TCP flag statistics
@@ -182,10 +182,9 @@ class ProtocolGraphBuilder:
                 valid_protocols.append(protocol)
             else:
                 # Use zero features for missing protocol data
-                default_size = 8  # Standardized feature size
-                node_feature_list.append([0.0] * default_size)
+                node_feature_list.append([0.0] * 8)
                 valid_protocols.append(protocol)
-        
+    
         # Create fully connected graph between protocols
         edge_src, edge_dst = [], []
         
@@ -233,5 +232,5 @@ class ProtocolGraphBuilder:
             graph_data = self.build_temporal_graph(protocol_features, window_num)
             graph_dataset.append(graph_data)
         
-        return graph_dataset
+        return graph_dataset, protocol_data
     

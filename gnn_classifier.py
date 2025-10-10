@@ -6,45 +6,50 @@ from torch_geometric.nn import GCNConv
 from torch_geometric.data import Data, Batch
 import numpy as np
 
-class TemporalGNN(nn.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels, num_protocols=3):
-        super(TemporalGNN, self).__init__()
+class AnomalyGNN(nn.Module):
+    def __init__(self, in_channels, hidden_channels, num_protocols=3):
+        super(AnomalyGNN, self).__init__()
         self.num_protocols = num_protocols
         
         # Graph convolution layers
         self.conv1 = GCNConv(in_channels, hidden_channels)
         self.conv2 = GCNConv(hidden_channels, hidden_channels)
+        self.conv3 = GCNConv(hidden_channels, hidden_channels // 2)
         
-        # Global pooling and classification
-        self.pool = nn.AdaptiveAvgPool1d(1)
-        self.classifier = nn.Sequential(
-            nn.Linear(hidden_channels * num_protocols, hidden_channels),
+        # Protocol-specific attention
+        self.protocol_attention = nn.Linear(hidden_channels // 2, 1)
+        
+        # Anomaly detection head
+        self.anomaly_classifier = nn.Sequential(
+            nn.Linear(hidden_channels // 2 * num_protocols, hidden_channels),
             nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(hidden_channels, out_channels)
+            nn.Dropout(0.4),
+            nn.Linear(hidden_channels, hidden_channels // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_channels // 2, 2)  # 2 classes: normal vs anomaly
         )
         
     def forward(self, x, edge_index, batch=None):
         # Graph convolutions
-        x = self.conv1(x, edge_index)
-        x = F.relu(x)
-        x = self.conv2(x, edge_index)
-        x = F.relu(x)
+        x = F.relu(self.conv1(x, edge_index))
+        x = F.relu(self.conv2(x, edge_index))
+        x = F.relu(self.conv3(x, edge_index))
         
-        # Reshape for temporal processing (if needed)
-        # For now, flatten all node features for classification
+        # Reshape for protocol-level processing
         batch_size = x.shape[0] // self.num_protocols
-        x = x.view(batch_size, -1)
+        x = x.view(batch_size, self.num_protocols, -1)
         
-        # Classification
-        x = self.classifier(x)
+        # Protocol attention weights
+        attention_weights = F.softmax(self.protocol_attention(x), dim=1)
+        x = (x * attention_weights).sum(dim=1)
+        
+        # Anomaly classification
+        x = self.anomaly_classifier(x)
         return F.log_softmax(x, dim=1)
 
 def create_data_loaders(graph_datasets, labels, batch_size=32):
     """
     Create data loaders for train/val/test sets
-    graph_datasets: list of Data objects for each time window
-    labels: corresponding labels for each time window
     """
     from torch_geometric.loader import DataLoader
     
@@ -56,7 +61,7 @@ def create_data_loaders(graph_datasets, labels, batch_size=32):
     loader = DataLoader(graph_datasets, batch_size=batch_size, shuffle=True)
     return loader
 
-def train_temporal(model, train_loader, val_loader, optimizer, criterion, epochs=50):
+def train_anomaly_detection(model, train_loader, val_loader, optimizer, criterion, epochs=100):
     model.train()
     
     for epoch in range(epochs):
@@ -69,38 +74,58 @@ def train_temporal(model, train_loader, val_loader, optimizer, criterion, epochs
             optimizer.step()
             total_loss += loss.item()
         
-        # Validation
+        # Validation with detailed metrics
         if epoch % 10 == 0:
             model.eval()
-            val_loss = 0
-            correct = 0
-            total = 0
+            val_metrics = evaluate_anomaly_detection(model, val_loader)
             
-            with torch.no_grad():
-                for batch in val_loader:
-                    out = model(batch.x, batch.edge_index, batch.batch)
-                    val_loss += criterion(out, batch.y).item()
-                    pred = out.argmax(dim=1)
-                    correct += (pred == batch.y).sum().item()
-                    total += batch.y.size(0)
+            print(f"Epoch {epoch}, Train Loss: {total_loss/len(train_loader):.4f}")
+            print(f"Val - Loss: {val_metrics['loss']:.4f}, Acc: {val_metrics['accuracy']:.4f}")
+            print(f"Val - Precision: {val_metrics['precision']:.4f}, Recall: {val_metrics['recall']:.4f}")
+            print(f"Val - F1: {val_metrics['f1']:.4f}")
+            print(f"Val - TP: {val_metrics['tp']}, FP: {val_metrics['fp']}, TN: {val_metrics['tn']}, FN: {val_metrics['fn']}")
+            print("-" * 50)
             
-            val_acc = correct / total if total > 0 else 0
-            print(f"Epoch {epoch}, Train Loss: {total_loss/len(train_loader):.4f}, "
-                  f"Val Loss: {val_loss/len(val_loader):.4f}, Val Acc: {val_acc:.4f}")
             model.train()
 
-def test_temporal(model, test_loader):
+def evaluate_anomaly_detection(model, loader):
     model.eval()
-    correct = 0
-    total = 0
+    total_loss = 0
+    criterion = nn.NLLLoss()
+    
+    # Confusion matrix components
+    tp, fp, tn, fn = 0, 0, 0, 0
     
     with torch.no_grad():
-        for batch in test_loader:
+        for batch in loader:
             out = model(batch.x, batch.edge_index, batch.batch)
+            loss = criterion(out, batch.y)
+            total_loss += loss.item()
+            
             pred = out.argmax(dim=1)
-            correct += (pred == batch.y).sum().item()
-            total += batch.y.size(0)
+            
+            # Calculate confusion matrix
+            for i in range(len(pred)):
+                if batch.y[i] == 1 and pred[i] == 1:  # True Positive
+                    tp += 1
+                elif batch.y[i] == 0 and pred[i] == 1:  # False Positive
+                    fp += 1
+                elif batch.y[i] == 0 and pred[i] == 0:  # True Negative
+                    tn += 1
+                elif batch.y[i] == 1 and pred[i] == 0:  # False Negative
+                    fn += 1
     
-    acc = correct / total if total > 0 else 0
-    print(f"Test Accuracy: {acc:.4f} ({correct}/{total} correct)")
-    return acc
+    # Calculate metrics
+    accuracy = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+    
+    return {
+        'loss': total_loss / len(loader),
+        'accuracy': accuracy,
+        'precision': precision,
+        'recall': recall,
+        'f1': f1,
+        'tp': tp, 'fp': fp, 'tn': tn, 'fn': fn
+    }
