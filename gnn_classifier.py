@@ -16,12 +16,9 @@ class AnomalyGNN(nn.Module):
         self.conv2 = GCNConv(hidden_channels, hidden_channels)
         self.conv3 = GCNConv(hidden_channels, hidden_channels // 2)
         
-        # Protocol-specific attention
-        self.protocol_attention = nn.Linear(hidden_channels // 2, 1)
-        
-        # Anomaly detection head
+        # Anomaly detection head - fixed input size
         self.anomaly_classifier = nn.Sequential(
-            nn.Linear(hidden_channels // 2 * num_protocols, hidden_channels),
+            nn.Linear((hidden_channels // 2) * num_protocols, hidden_channels),
             nn.ReLU(),
             nn.Dropout(0.4),
             nn.Linear(hidden_channels, hidden_channels // 2),
@@ -35,13 +32,17 @@ class AnomalyGNN(nn.Module):
         x = F.relu(self.conv2(x, edge_index))
         x = F.relu(self.conv3(x, edge_index))
         
-        # Reshape for protocol-level processing
-        batch_size = x.shape[0] // self.num_protocols
-        x = x.view(batch_size, self.num_protocols, -1)
+        # Handle batching - get batch indices if not provided
+        if batch is None:
+            # If no batch provided, assume single graph
+            batch = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
         
-        # Protocol attention weights
-        attention_weights = F.softmax(self.protocol_attention(x), dim=1)
-        x = (x * attention_weights).sum(dim=1)
+        # Group by batch and protocol, then flatten
+        batch_size = batch.max().item() + 1
+        
+        # Reshape: (batch_size * num_protocols, features) -> (batch_size, num_protocols * features)
+        x = x.view(batch_size, self.num_protocols, -1)
+        x = x.reshape(batch_size, -1)  # Flatten protocol features
         
         # Anomaly classification
         x = self.anomaly_classifier(x)
