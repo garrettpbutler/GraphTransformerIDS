@@ -80,67 +80,90 @@ class ProtocolGraphBuilder:
             return []
     
     def _extract_goose_features(self, row):
-        """Extract GOOSE protocol features"""
+        """Extract GOOSE protocol features keeping list structures"""
         features = [
-            row.get('Num_Packets', 0) / 100.0,  # Normalized packet count
-            row.get('Avg_Length', 0) / 1500.0,  # Normalized length
-            row.get('stNum_Change', 0),
-            row.get('sqNum_Reset', 0), 
-            row.get('ConfRev_Change', 0),
-            row.get('Boolean_Data_Change', 0)
+            row.get('Num_Packets', 0) / 100.0,                    # Feature 0
+            row.get('Avg_Length', 0) / 1500.0,                    # Feature 1  
+            float(row.get('stNum_Change', 0)),                    # Feature 2
+            float(row.get('sqNum_Reset', 0)),                     # Feature 3
+            float(row.get('ConfRev_Change', 0)),                  # Feature 4
+            float(row.get('Boolean_Data_Change', 0)),             # Feature 5
         ]
         
-        # Add MAC address diversity (number of unique MACs)
+        # Use the actual list lengths as features
         src_macs = self.parse_list_features(row.get('Eth_Src', '[]'))
         dst_macs = self.parse_list_features(row.get('Eth_Dst', '[]'))
-        mac_diversity = len(set(src_macs + dst_macs)) / 10.0  # Normalized
-        features.append(mac_diversity)
         
+        # Feature 6: Number of source MACs (normalized)
+        features.append(len(src_macs) / 10.0)
+        
+        # Feature 7: Number of destination MACs (normalized)
+        features.append(len(dst_macs) / 10.0)
+        
+        assert len(features) == 8, f"GOOSE features should be 8, got {len(features)}"
         return features
     
     def _extract_dnp3_features(self, row):
-        """Extract DNP3 protocol features"""
+        """Extract DNP3 protocol features keeping list structures"""
         features = [
-            row.get('Num_Packets', 0) / 100.0,
-            row.get('Avg_DNP3_Length', 0) / 1500.0,
-            row.get('IIN_Val_Change', 0),
-            row.get('IIN_Bits_Set', 0) if not isinstance(row.get('IIN_Bits_Set', 0), list) else len(row.get('IIN_Bits_Set', [])),
-            row.get('Data_Object_Change', 0)
+            row.get('Num_Packets', 0) / 100.0,                    # Feature 0
+            row.get('Avg_DNP3_Length', 0) / 1500.0,               # Feature 1
+            float(row.get('IIN_Val_Change', 0)),                  # Feature 2
+            float(row.get('Data_Object_Change', 0)),              # Feature 3
         ]
         
-        # Parse function codes
+        # Use list lengths from DNP3 data
+        src_ports = self.parse_list_features(row.get('IP_Port_Src', '[]'))
+        dst_ports = self.parse_list_features(row.get('IP_Port_Dst', '[]'))
         func_codes = self.parse_list_features(row.get('Function_Codes', '[]'))
-        if func_codes:
-            features.extend([
-                sum(func_codes) / len(func_codes),  # Avg function code usage
-                max(func_codes) / 10.0,  # Normalized max function code
-                len([fc for fc in func_codes if fc > 0]) / len(func_codes)  # Active function ratio
-            ])
-        else:
-            features.extend([0, 0, 0])
+        iin_bits = self.parse_list_features(row.get('IIN_Bits_Set', '[]'))
         
+        # Feature 4: Number of source IP:Port pairs
+        features.append(len(src_ports) / 10.0)
+        
+        # Feature 5: Number of destination IP:Port pairs  
+        features.append(len(dst_ports) / 10.0)
+        
+        # Feature 6: Number of function codes used
+        features.append(len([fc for fc in func_codes if fc > 0]) / 10.0)
+        
+        # Feature 7: Number of IIN bits set
+        features.append(len(iin_bits) / 10.0)
+        
+        assert len(features) == 8, f"DNP3 features should be 8, got {len(features)}"
         return features
-    
+
     def _extract_tcp_features(self, row):
-        """Extract TCP protocol features"""
+        """Extract TCP protocol features keeping list structures"""
         features = [
-            row.get('Num_Packets', 0) / 100.0,
-            row.get('Avg_Length', 0) / 1500.0,
-            row.get('Connection_Count', 0) / 10.0  # Normalized connection count
+            row.get('Num_Packets', 0) / 100.0,                    # Feature 0
+            row.get('Avg_Length', 0) / 1500.0,                    # Feature 1
         ]
         
-        # Parse TCP flags
+        # Use list lengths from TCP data
+        src_ips = self.parse_list_features(row.get('IP_Port_Src', '[]'))
+        dst_ips = self.parse_list_features(row.get('IP_Port_Dst', '[]'))
         tcp_flags = self.parse_list_features(row.get('TCP_Flags', '[]'))
-        if tcp_flags:
-            features.extend(tcp_flags[:5])  # Use first 5 flag indicators
-        else:
-            features.extend([0, 0, 0, 0, 0])
         
-        # Ensure consistent feature length
-        while len(features) < 8:
-            features.append(0)
-            
-        return features[:8]  # Standardize to 8 features
+        # Feature 2: Number of source IP:Port pairs
+        features.append(len(src_ips) / 10.0)
+        
+        # Feature 3: Number of destination IP:Port pairs
+        features.append(len(dst_ips) / 10.0)
+        
+        # Feature 4: Connection count (from your CSV)
+        features.append(float(row.get('Connection_Count', 0)) / 10.0)
+        
+        # Features 5-7: TCP flag statistics
+        if tcp_flags:
+            features.append(sum(tcp_flags) / len(tcp_flags))      # Avg flag value
+            features.append(max(tcp_flags))                       # Max flag value
+            features.append(len([f for f in tcp_flags if f > 0]) / len(tcp_flags))  # Active flag ratio
+        else:
+            features.extend([0.0, 0.0, 0.0])
+        
+        assert len(features) == 8, f"TCP features should be 8, got {len(features)}"
+        return features
     
     def build_temporal_graph(self, protocol_features, window_num):
         """
