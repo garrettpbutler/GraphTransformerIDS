@@ -1,10 +1,10 @@
-# Add this new file: graph_visualizer.py
+# graph_visualizer.py - Fixed imports
 
 import matplotlib.pyplot as plt
 import networkx as nx
 import torch
 import numpy as np
-from torch_geometric.utils import to_networkx_graph
+from torch_geometric.utils import to_networkx
 
 class GraphVisualizer:
     def __init__(self):
@@ -64,40 +64,46 @@ class GraphVisualizer:
         """
         Plot the graph structure for a single time window
         """
-        # Convert to networkx graph
-        G = to_networkx_graph(graph_data, to_undirected=True)
-        
-        plt.figure(figsize=(10, 8))
-        
-        # Define node positions in a triangle layout
-        pos = {
-            0: (0, 1),   # GOOSE - top
-            1: (-1, 0),  # DNP3 - left
-            2: (1, 0)    # TCP - right
-        }
-        
-        # Node colors
-        node_colors = [self.protocol_colors['GOOSE'], 
-                      self.protocol_colors['DNP3'], 
-                      self.protocol_colors['TCP']]
-        
-        # Draw the graph
-        nx.draw_networkx_nodes(G, pos, node_color=node_colors, 
-                              node_size=2000, alpha=0.8)
-        nx.draw_networkx_edges(G, pos, width=2, alpha=0.6, edge_color='gray')
-        nx.draw_networkx_labels(G, pos, font_size=12, font_weight='bold')
-        
-        # Add edge labels (weights or features)
-        edge_labels = {}
-        for i, (src, dst) in enumerate(zip(graph_data.edge_index[0], graph_data.edge_index[1])):
-            edge_labels[(src.item(), dst.item())] = f'{i+1}'
-        
-        nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=8)
-        
-        plt.title(f'Protocol Interaction Graph - Window {window_num}')
-        plt.axis('off')
-        plt.savefig(f'window_{window_num}_graph.png', dpi=300, bbox_inches='tight')
-        plt.show()
+        try:
+            # Convert to networkx graph - FIXED IMPORT
+            G = to_networkx(graph_data, to_undirected=True)
+            
+            plt.figure(figsize=(10, 8))
+            
+            # Define node positions in a triangle layout
+            pos = {
+                0: (0, 1),   # GOOSE - top
+                1: (-1, 0),  # DNP3 - left
+                2: (1, 0)    # TCP - right
+            }
+            
+            # Node colors
+            node_colors = [self.protocol_colors['GOOSE'], 
+                          self.protocol_colors['DNP3'], 
+                          self.protocol_colors['TCP']]
+            
+            # Draw the graph
+            nx.draw_networkx_nodes(G, pos, node_color=node_colors, 
+                                  node_size=2000, alpha=0.8)
+            nx.draw_networkx_edges(G, pos, width=2, alpha=0.6, edge_color='gray')
+            nx.draw_networkx_labels(G, pos, font_size=12, font_weight='bold')
+            
+            # Add edge labels (weights or features)
+            edge_labels = {}
+            for i, (src, dst) in enumerate(zip(graph_data.edge_index[0], graph_data.edge_index[1])):
+                edge_labels[(src.item(), dst.item())] = f'{i+1}'
+            
+            nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=8)
+            
+            plt.title(f'Protocol Interaction Graph - Window {window_num}')
+            plt.axis('off')
+            plt.savefig(f'window_{window_num}_graph.png', dpi=300, bbox_inches='tight')
+            plt.show()
+            
+        except Exception as e:
+            print(f"Error plotting graph for window {window_num}: {e}")
+            # Fallback: just print the graph info
+            print(f"Window {window_num}: {graph_data.num_nodes} nodes, {graph_data.num_edges} edges")
     
     def plot_anomaly_detection_timeline(self, graph_dataset, predictions, labels, num_windows=50):
         """
@@ -190,4 +196,36 @@ class GraphVisualizer:
         plt.title('Protocol Feature Correlation Matrix')
         plt.tight_layout()
         plt.savefig('protocol_correlation.png', dpi=300, bbox_inches='tight')
+        plt.show()
+
+    def quick_visualization(self, graph_dataset, labels=None, num_windows=30):
+        """Quick plot of feature evolution"""
+        if num_windows > len(graph_dataset):
+            num_windows = len(graph_dataset)
+        
+        time_points = range(num_windows)
+        
+        # Extract first feature from each protocol
+        goose_f0 = [g.x[0][0].item() for g in graph_dataset[:num_windows]]
+        dnp3_f0 = [g.x[1][0].item() for g in graph_dataset[:num_windows]]
+        tcp_f0 = [g.x[2][0].item() for g in graph_dataset[:num_windows]]
+        
+        plt.figure(figsize=(12, 6))
+        plt.plot(time_points, goose_f0, 'r-', label='GOOSE Packets', linewidth=2)
+        plt.plot(time_points, dnp3_f0, 'b-', label='DNP3 Packets', linewidth=2) 
+        plt.plot(time_points, tcp_f0, 'g-', label='TCP Packets', linewidth=2)
+        
+        # Mark anomalies if labels provided
+        if labels is not None:
+            for i in range(min(num_windows, len(labels))):
+                if labels[i] == 1:
+                    plt.axvline(x=i, color='red', alpha=0.3, linestyle='--', label='Anomaly' if i == 0 else "")
+        
+        plt.title('Protocol Traffic Over Time Windows')
+        plt.xlabel('Time Window (5-second intervals)')
+        plt.ylabel('Normalized Packet Count')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig('quick_visualization.png', dpi=300, bbox_inches='tight')
         plt.show()
