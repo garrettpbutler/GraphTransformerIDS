@@ -1,5 +1,6 @@
-# graph_visualizer.py - Fixed imports
-
+import matplotlib
+# Use non-interactive backend - CRITICAL FIX
+matplotlib.use('Agg')  # This must be before importing pyplot
 import matplotlib.pyplot as plt
 import networkx as nx
 import torch
@@ -20,6 +21,8 @@ class GraphVisualizer:
         """
         if num_windows > len(graph_dataset):
             num_windows = len(graph_dataset)
+        
+        print(f"Creating feature evolution plot for {num_windows} windows...")
         
         # Select first few windows to visualize
         selected_windows = graph_dataset[:num_windows]
@@ -58,14 +61,17 @@ class GraphVisualizer:
         
         plt.tight_layout()
         plt.savefig('feature_evolution.png', dpi=300, bbox_inches='tight')
-        plt.show()
+        print("✓ Saved feature_evolution.png")
+        plt.close()  # Important: close the figure to free memory
     
     def plot_single_window_graph(self, graph_data, window_num):
         """
         Plot the graph structure for a single time window
         """
         try:
-            # Convert to networkx graph - FIXED IMPORT
+            print(f"Creating graph visualization for window {window_num}...")
+            
+            # Convert to networkx graph
             G = to_networkx(graph_data, to_undirected=True)
             
             plt.figure(figsize=(10, 8))
@@ -98,7 +104,8 @@ class GraphVisualizer:
             plt.title(f'Protocol Interaction Graph - Window {window_num}')
             plt.axis('off')
             plt.savefig(f'window_{window_num}_graph.png', dpi=300, bbox_inches='tight')
-            plt.show()
+            print(f"✓ Saved window_{window_num}_graph.png")
+            plt.close()  # Important: close the figure
             
         except Exception as e:
             print(f"Error plotting graph for window {window_num}: {e}")
@@ -111,6 +118,8 @@ class GraphVisualizer:
         """
         if num_windows > len(graph_dataset):
             num_windows = len(graph_dataset)
+        
+        print(f"Creating anomaly timeline plot for {num_windows} windows...")
         
         time_points = range(num_windows)
         
@@ -161,7 +170,8 @@ class GraphVisualizer:
         
         plt.tight_layout()
         plt.savefig('anomaly_timeline.png', dpi=300, bbox_inches='tight')
-        plt.show()
+        print("✓ Saved anomaly_timeline.png")
+        plt.close()
     
     def plot_protocol_correlation_heatmap(self, graph_dataset, num_windows=20):
         """
@@ -169,6 +179,8 @@ class GraphVisualizer:
         """
         if num_windows > len(graph_dataset):
             num_windows = len(graph_dataset)
+        
+        print(f"Creating correlation heatmap for {num_windows} windows...")
         
         # Extract all features for correlation analysis
         all_features = []
@@ -179,8 +191,11 @@ class GraphVisualizer:
         
         all_features = np.array(all_features)
         
-        # Calculate correlation matrix
-        correlation_matrix = np.corrcoef(all_features.T)
+        # Calculate correlation matrix (handle division by zero)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            correlation_matrix = np.corrcoef(all_features.T)
+            # Replace NaN and Inf with 0
+            correlation_matrix = np.nan_to_num(correlation_matrix, nan=0.0, posinf=0.0, neginf=0.0)
         
         plt.figure(figsize=(12, 10))
         im = plt.imshow(correlation_matrix, cmap='coolwarm', vmin=-1, vmax=1, aspect='auto')
@@ -196,12 +211,15 @@ class GraphVisualizer:
         plt.title('Protocol Feature Correlation Matrix')
         plt.tight_layout()
         plt.savefig('protocol_correlation.png', dpi=300, bbox_inches='tight')
-        plt.show()
+        print("✓ Saved protocol_correlation.png")
+        plt.close()
 
     def quick_visualization(self, graph_dataset, labels=None, num_windows=30):
         """Quick plot of feature evolution"""
         if num_windows > len(graph_dataset):
             num_windows = len(graph_dataset)
+        
+        print(f"Creating quick visualization for {num_windows} windows...")
         
         time_points = range(num_windows)
         
@@ -228,4 +246,5 @@ class GraphVisualizer:
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
         plt.savefig('quick_visualization.png', dpi=300, bbox_inches='tight')
-        plt.show()
+        print("✓ Saved quick_visualization.png")
+        plt.close()
