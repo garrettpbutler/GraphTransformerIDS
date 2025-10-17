@@ -6,6 +6,7 @@ import os
 import numpy as np
 from dataset_builder import ProtocolGraphBuilder
 from gnn_classifier import AnomalyGNN, create_data_loaders, train_anomaly_detection, evaluate_anomaly_detection
+from graph_visualizer import GraphVisualizer
 
 def load_labels_from_attack_column(csv_path):
     """
@@ -95,6 +96,32 @@ def main():
     if sum(train_labels) == 0:
         print("WARNING: No attack data found in training set!")
         print("The model will only learn to identify normal behavior.")
+
+    # Initialize visualizer
+    visualizer = GraphVisualizer()
+    
+    # Define feature names for better visualization
+    feature_names = [
+        'Num_Packets', 'Avg_Length', 'stNum_Change', 'sqNum_Reset',
+        'ConfRev_Change', 'Boolean_Change', 'Src_MAC_Count', 'Dst_MAC_Count'
+    ]
+    
+    print("Generating visualizations...")
+    
+    # 1. Plot feature evolution for first 20 windows
+    print("Plotting feature evolution...")
+    visualizer.plot_feature_evolution(train_graphs, feature_names, num_windows=20)
+    
+    # 2. Plot graph structure for a few sample windows
+    print("Plotting sample graph structures...")
+    sample_windows = [0, 50, 100]  # Early, middle, late windows
+    for window_num in sample_windows:
+        if window_num < len(train_graphs):
+            visualizer.plot_single_window_graph(train_graphs[window_num], window_num)
+    
+    # 3. Plot protocol correlation heatmap
+    print("Plotting protocol correlations...")
+    visualizer.plot_protocol_correlation_heatmap(train_graphs, num_windows=50)
     
     # Create data loaders
     train_loader = create_data_loaders(train_graphs, train_labels, batch_size=16)
@@ -124,6 +151,22 @@ def main():
     
     print("Starting anomaly detection training...")
     train_anomaly_detection(model, train_loader, val_loader, optimizer, criterion, epochs=100)
+
+    # After training, plot anomaly detection results
+    if len(val_labels) > 0:
+        # Get predictions for validation set
+        model.eval()
+        val_predictions = []
+        with torch.no_grad():
+            for batch in val_loader:
+                out = model(batch.x, batch.edge_index, batch.batch)
+                pred = out.argmax(dim=1)
+                val_predictions.extend(pred.cpu().numpy())
+        
+        print("Plotting anomaly detection timeline...")
+        visualizer.plot_anomaly_detection_timeline(
+            val_graphs, val_predictions, val_labels, num_windows=50
+        )
     
     print("Testing anomaly detection...")
     test_metrics = evaluate_anomaly_detection(model, test_loader)
